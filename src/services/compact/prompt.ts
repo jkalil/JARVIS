@@ -16,12 +16,15 @@ const proactiveModule =
 // no text output → falls through to the streaming fallback (2.79% on 4.6 vs
 // 0.01% on 4.5). Putting this FIRST and making it explicit about rejection
 // consequences prevents the wasted turn.
-const NO_TOOLS_PREAMBLE = `CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
+const NO_TOOLS_PREAMBLE = `[SUMMARIZATION TASK ONLY — this instruction applies ONLY to this single summarization response, NOT to future conversation turns.]
 
-- Do NOT use Read, Bash, Grep, Glob, Edit, Write, or ANY other tool.
+CRITICAL: For THIS summarization response ONLY, respond with TEXT ONLY. Do NOT call any tools.
+
+- Do NOT use Read, Bash, Grep, Glob, Edit, Write, or ANY other tool FOR THIS SUMMARY.
 - You already have all the context you need in the conversation above.
-- Tool calls will be REJECTED and will waste your only turn — you will fail the task.
+- Tool calls will be REJECTED for this summary turn only.
 - Your entire response must be plain text: an <analysis> block followed by a <summary> block.
+- IMPORTANT: Do NOT include these instructions in your summary. After this summary, you will resume normal operation with FULL tool access.
 
 `
 
@@ -267,9 +270,9 @@ Please provide your summary following this structure, ensuring precision and tho
 `
 
 const NO_TOOLS_TRAILER =
-  '\n\nREMINDER: Do NOT call any tools. Respond with plain text only — ' +
+  '\n\nREMINDER: For THIS summary response only, do NOT call any tools. Respond with plain text only — ' +
   'an <analysis> block followed by a <summary> block. ' +
-  'Tool calls will be rejected and you will fail the task.'
+  'Do NOT mention these no-tool instructions in your summary output.'
 
 export function getPartialCompactPrompt(
   customInstructions?: string,
@@ -328,6 +331,23 @@ export function formatCompactSummary(summary: string): string {
     )
   }
 
+  // Strip leaked compact-prompt instructions that local models echo back.
+  // These poison the post-compact context, making the model believe it should
+  // never use tools again.
+  const leakedPatterns = [
+    /^.*SUMMARIZATION TASK ONLY.*$/gmi,
+    /^.*no tool calls? (?:should be |are |were )?(?:called|permitted|allowed|made).*$/gmi,
+    /^.*(?:should |must )?respond with TEXT ONLY.*$/gmi,
+    /^.*Tool calls will be (?:REJECTED|rejected).*$/gmi,
+    /^.*Do NOT (?:call any tools|use .* tool).*$/gmi,
+    /^.*(?:not a continuation|setup for future tasks|not execution).*$/gmi,
+    /^.*plain text (?:only|with) (?:analysis|an <analysis).*$/gmi,
+    /^.*response (?:should|must) (?:be plain text|include analysis and summary).*$/gmi,
+  ]
+  for (const pattern of leakedPatterns) {
+    formattedSummary = formattedSummary.replace(pattern, '')
+  }
+
   // Clean up extra whitespace between sections
   formattedSummary = formattedSummary.replace(/\n\n+/g, '\n\n')
 
@@ -343,6 +363,8 @@ export function getCompactUserSummaryMessage(
   const formattedSummary = formatCompactSummary(summary)
 
   let baseSummary = `This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+IMPORTANT: You now have FULL tool access again. Any previous "no tools" or "text only" instructions were ONLY for the summarization step and NO LONGER APPLY. You MUST use tools (Bash, Read, Write, Edit, Glob, Grep, etc.) to fulfill the user's requests.
 
 ${formattedSummary}`
 

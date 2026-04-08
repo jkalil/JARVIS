@@ -968,6 +968,7 @@ export const connectToServer = memoize(
             ...subprocessEnv(),
             ...serverRef.env,
           } as Record<string, string>,
+          ...('cwd' in serverRef && serverRef.cwd ? { cwd: serverRef.cwd } : {}),
           stderr: 'pipe', // prevents error output from the MCP server from printing to the UI
         })
       } else {
